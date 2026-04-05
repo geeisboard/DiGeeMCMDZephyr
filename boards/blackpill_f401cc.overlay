@@ -1,0 +1,128 @@
+#include <dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/* Disable SPI1 to free PA6 and PA7 for TIM3 */
+&spi1 {
+    status = "disabled";
+};
+
+&pinctrl {
+    usart1_tx_pa9: usart1_tx_pa9 {
+        pinmux = <STM32_PINMUX('A', 9, AF7)>;
+        bias-disable;
+        drive-push-pull;
+        slew-rate = "very-high-speed";
+    };
+
+    usart2_tx_pa2: usart2_tx_pa2 {
+        pinmux = <STM32_PINMUX('A', 2, AF7)>;
+        bias-disable;
+        drive-push-pull;
+        slew-rate = "very-high-speed";
+    };
+};
+
+/* OLED (PB8=SCL, PB9=SDA) */
+&i2c1 {
+    status = "okay";
+    /* PB8 = SCL, PB9 = SDA — default board pins, no pinctrl override needed */
+    pinctrl-names = "default";
+    clock-frequency = <I2C_BITRATE_FAST>;
+
+    ssd1306: ssd1306@3c {
+        compatible = "solomon,ssd1306";
+        reg = <0x3c>;
+        width = <128>;
+        height = <64>;
+        segment-offset = <0>;
+        page-offset = <0>;
+        display-offset = <0>;
+        multiplex-ratio = <63>;
+        prechargep = <0x22>;
+        segment-remap;
+        com-invdir;
+    };
+};
+
+&usart1 {
+    status = "okay";
+    current-speed = <31250>;
+    pinctrl-0 = <&usart1_tx_pa9>;  /* adjust pin to your wiring */
+    pinctrl-names = "default";
+    single-wire;
+};
+
+&usart2 {
+    status = "okay";
+    current-speed = <31250>;
+    pinctrl-0 = <&usart2_tx_pa2>;  /* adjust pin to your wiring */
+    pinctrl-names = "default";
+    single-wire;
+};
+
+/* TIM3 CH1=PA6, CH2=PA7 */
+&timers3 {
+    status = "okay";
+
+    qdec: qdec {
+        compatible = "st,stm32-qdec";
+        status = "okay";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+        pinctrl-names = "default";
+        st,counts-per-revolution = <20>;
+        st,input-filter-level = <FDIV32_N8>;
+    };
+};
+/* 16BIT - disabled to use TIM4 for MIDI clock directly */
+&timers4 {
+    status = "disabled";
+};
+
+/* 32 BIT - disabled to use TIM5 for MIDI clock directly */
+&timers5 {
+    status = "disabled";
+};
+ &timers5 {
+    status = "disabled";
+};
+
+/ {
+    chosen {
+        zephyr,display = &ssd1306;
+    };
+
+    aliases {
+        qdec0               = &qdec;
+        midi-master-uart    = &usart1;
+        midi-poly-uart      = &usart2;
+    };
+
+    encodersw {
+        compatible = "gpio-keys";
+
+        encodersw0: encoder_sw0 {
+            gpios = <&gpiob 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Encoder SW";
+        };
+    };
+
+    buttons {
+        compatible = "gpio-keys";
+
+        button0: button_0 {
+            gpios = <&gpiob 12 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Button 0";
+        };
+        button1: button_1 {
+            gpios = <&gpiob 13 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Button 1";
+        };
+        button2: button_2 {
+            gpios = <&gpiob 14 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Button 2";
+        };
+        button3: button_3 {
+            gpios = <&gpiob 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "Button 3";
+        };
+    };
+};
