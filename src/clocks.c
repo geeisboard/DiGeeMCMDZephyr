@@ -1,12 +1,12 @@
 #include "clocks.h"
 #include "midi.h"
-#include <zephyr/kernel.h>
+#include <stdint.h>
+// #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/device.h>
 #include <zephyr/spinlock.h>
-#include "ssd1306_ctrl.h"
 
-static struct k_spinlock _lock;   // <-- moved here
+static struct k_spinlock _lock;   // Spinlock
 
 #define ATOMIC(x) do { \
     k_spinlock_key_t _key = k_spin_lock(&_lock); \
@@ -14,25 +14,36 @@ static struct k_spinlock _lock;   // <-- moved here
     k_spin_unlock(&_lock, _key); \
 } while (0)
 
-static midi_clock_dev_t *master_clock_dev = NULL;
-static midi_clock_dev_t *poly_clock_dev = NULL;
+static midi_clock_dev_t *m_clock_dev = NULL; // Main clock pointer
+static midi_clock_dev_t *p_clock_dev = NULL; // Poly clock pointer
+static step_cb_t step_callback = NULL; // Loop callback
+static clock_controller_t *clock_ctrl = NULL; // Internal struct that retains clock information
 
-static step_cb_t step_callback = NULL;
-
-static volatile uint8_t clock_mode = UCLOCK_INTERNAL;
-static volatile uint32_t ext_clock_us = 0;
-static volatile uint32_t ext_interval = 0;
-static volatile float external_tempo = 120.0f;
-static uint32_t ext_interval_buffer[64] = {0};
-static uint8_t ext_interval_idx = 0;
-static uint8_t ext_interval_count = 0;
-
-static uint32_t master_next_tick_us = 0;
-static uint32_t poly_next_tick_us = 0;
+// FOR FUTURE SYNCHRONISATION WITH EXTERNAL CLOCK
+// static volatile uint8_t clock_mode = UCLOCK_INTERNAL;
+// static volatile uint32_t ext_clock_us = 0;
+// static volatile uint32_t ext_interval = 0;
+// static volatile float external_tempo = 120.0f;
+// static uint32_t ext_interval_buffer[64] = {0};
+// static uint8_t ext_interval_idx = 0;
+// static uint8_t ext_interval_count = 0;
 
 static inline uint32_t now_us(void)
 {
     return (uint32_t)k_ticks_to_us_floor64(k_uptime_ticks());
+}
+
+uint32_t POLY_BPM_TO_US(clock_controller_t *dev)
+{   
+    uint8_t num = dev->binary;
+    if (num==0) num = 16;
+    if (dev->divide_s) {
+        printf("dividing to get interval\n");
+        return POLY_BPM_TO_US_DIV(dev->bpm, num);
+    } else {
+        printf("multiplying to get interval\n");
+        return POLY_BPM_TO_US_MULT(dev->bpm, num);
+    }
 }
 
 void midi_clock_set_step_callback(step_cb_t cb)
@@ -42,136 +53,135 @@ void midi_clock_set_step_callback(step_cb_t cb)
 
 void midi_clock_poll(void)
 {
+    // GET CURRENT TIME
     uint32_t now = now_us();
-    
-    if (master_clock_dev && master_clock_dev->running) {
-        if ((int32_t)(now - master_next_tick_us) >= 0) {
-            
-            static uint32_t last_tick_us = 0;
-            static uint32_t real_gap = 0;
-            real_gap = now - last_tick_us;
-            last_tick_us = now;
-            
-            char buf[32];
-            snprintf(buf, sizeof(buf), "us:%u",real_gap);
-
-            oled_clear_rect(0, 56, 128, 8);
-            oled_write_small(buf, 0, 56, false);
-
-            midi_clock(master_clock_dev->midi);
-            
-            uint32_t tick;
-            ATOMIC(
-                master_clock_dev->tick++;
-                tick = master_clock_dev->tick;
-            );
-            
-            master_next_tick_us = now + master_clock_dev->interval_us;
-
-            if (tick % 96 == 0 && step_callback) {
-                step_callback(tick / 96);
+    // MASTER CLOCK FIRST. IF RUNNING AND ITS NOT NULL >>
+    if (m_clock_dev && m_clock_dev->running) {
+        // IF THE CURRENT TIME IS GREATER THAN THE NEXT DECLARED TICK TIME
+        // CAST RESULT TO SIGNED INTEGER FOR SUBTRACTION
+        if ((int32_t)(now - m_clock_dev->next_tick_us) >= 0) {
+            // SEND MIDI CLOCK MESSAGE
+            midi_clock(m_clock_dev->midi);     
+            // SET NEXT INTERVAL TIME
+            m_clock_dev->next_tick_us = now + m_clock_dev->interval_us;
+            // UPDATE TICK
+            ATOMIC(m_clock_dev->tick++);
+            // A bit cheeky here, but it sounds natural in practice so let it be xx
+            if (m_clock_dev->tick >= 96 && step_callback) {
+                m_clock_dev->tick = 0;
+                step_callback(m_clock_dev->tick);
             }
         }
     }
     
-    if (poly_clock_dev && poly_clock_dev->running) {
-        if ((int32_t)(now - poly_next_tick_us) >= 0) {
-            midi_clock(poly_clock_dev->midi);
-            
-            ATOMIC(
-                poly_clock_dev->tick++;
-            );
-            
-            poly_next_tick_us = now + poly_clock_dev->interval_us;
+    if (p_clock_dev && p_clock_dev->running) {
+        if ((int32_t)(now - p_clock_dev->next_tick_us) >= 0) {
+            // SEND MIDI CLOCK MESSAGE
+            midi_clock(p_clock_dev->midi);
+            // SET NEXT INTERVAL TIME
+            p_clock_dev->next_tick_us = now + p_clock_dev->interval_us;
         }
     }
 }
 
-int midi_clock_init(midi_clock_dev_t *dev, midi_dev_t *midi, uint32_t bpm)
+int clock_ctrl_init(clock_controller_t *dev) 
+{    
+    if (!dev) return -EINVAL;
+    // Assign clock values from Digee_ctrl to internal clock values
+    clock_ctrl = dev;
+    return 0;
+}
+
+int midi_clock_init(midi_clock_dev_t *dev, midi_dev_t *midi, clock_type_t type)
 {
     if (!dev || !midi) return -EINVAL;
-
+    // Init clock
     dev->midi = midi;
-    dev->interval_us = BPM_TO_US(bpm);
     dev->tick = 0;
     dev->running = false;
+    dev->next_tick_us =0;
 
-    if (master_clock_dev == NULL) {
-        master_clock_dev = dev;
-    } else if (poly_clock_dev == NULL) {
-        poly_clock_dev = dev;
+    // MASTER
+    if (type == MASTER_CLOCK) {
+        dev->interval_us = BPM_TO_US(clock_ctrl->bpm);
+        m_clock_dev = dev;
+    } else if (type == POLY_CLOCK) {
+        dev->interval_us = POLY_BPM_TO_US(clock_ctrl);
+        p_clock_dev = dev; 
     }
 
     return 0;
 }
 
-void midi_clock_start(midi_clock_dev_t *dev)
+void clock_start(clock_controller_t *dev) 
 {
-    if (!dev || dev->running) return;
-
-    dev->running = true;
-    dev->tick = 0;
-
-    if (dev == master_clock_dev) {
-        midi_start(dev->midi);
-        master_next_tick_us = now_us() + dev->interval_us;
-    } else if (dev == poly_clock_dev) {
-        poly_next_tick_us = now_us() + dev->interval_us;
+    if (!dev || dev->paused) return;
+    
+    // Update clock_ctrl values
+    clock_ctrl = dev;
+    // IF THIS RUNS ITS A RESYNC INSTEAD BECAUSE 
+    if (m_clock_dev->running) {
+        uint32_t new_interval_p = POLY_BPM_TO_US(clock_ctrl);
+        p_clock_dev->tick = 0;
+        p_clock_dev->next_tick_us = now_us() + POLY_BPM_TO_US(clock_ctrl);
+        ATOMIC(p_clock_dev->interval_us = new_interval_p); // Use ATOMIC since we are live
+        midi_start(m_clock_dev->midi);
+        midi_start(p_clock_dev->midi);
+        return;
     }
+    // Set clocks to run
+    m_clock_dev->running = true;
+    p_clock_dev->running = true;
+    // Calc new intervals
+    uint32_t new_interval_m = BPM_TO_US(clock_ctrl->bpm);
+    uint32_t new_interval_p = POLY_BPM_TO_US(clock_ctrl);
+    // Reset master tick to 0, we dont increment the poly tick, no need
+    m_clock_dev->tick = 0;
+    // Assign next tick time
+    m_clock_dev->next_tick_us = now_us() + BPM_TO_US(clock_ctrl->bpm);
+    p_clock_dev->next_tick_us = now_us() + POLY_BPM_TO_US(clock_ctrl);
+    // Assign new interval between ticks, no need for ATOMIC since we are starting the clocks??
+    m_clock_dev->interval_us = new_interval_m;
+    p_clock_dev->interval_us = new_interval_p;
+    // Call midi start to both devices
+    midi_start(m_clock_dev->midi);
+    midi_start(p_clock_dev->midi);
 }
 
-void midi_clock_stop(midi_clock_dev_t *dev)
+void clock_stop(clock_controller_t *dev)
 {
-    if (!dev || !dev->running) return;
-
-    dev->running = false;
-
-    if (dev == master_clock_dev) {
-        midi_stop(dev->midi);
-    }
+    if (!dev || !dev->paused) return;
+    // Update clock_ctrl values
+    clock_ctrl = dev;
+    // Change clock states
+    m_clock_dev->running = false;
+    p_clock_dev->running = false;
+    // Call midi stop to both devices
+    midi_stop(m_clock_dev->midi);
+    midi_stop(p_clock_dev->midi);
 }
 
-void midi_clock_update(midi_clock_dev_t *dev, uint32_t bpm)
+void clock_update(clock_controller_t *dev)
 {
     if (!dev) return;
-    uint32_t interval = BPM_TO_US(bpm);
-
-    ATOMIC(dev->interval_us = BPM_TO_US(bpm));
-
-    if (dev == master_clock_dev)
-        master_next_tick_us = now_us() + interval;
+    // Update clock_ctrl values
+    clock_ctrl = dev;
+    // Calc new intervals
+    uint32_t new_interval_m = BPM_TO_US(clock_ctrl->bpm);
+    uint32_t new_interval_p = POLY_BPM_TO_US(clock_ctrl);
+    // Update new intervals with ATOMIC since we are live
+    ATOMIC(m_clock_dev->interval_us = new_interval_m);
+    ATOMIC(p_clock_dev->interval_us = new_interval_p);
+    // Get current time
+    uint32_t now = now_us();
+    // Only update the next tick time IF the new interval time + now is sooner than the old tick + now
+    if ((int32_t)(m_clock_dev->next_tick_us - (now + new_interval_m)) > 0)
+        m_clock_dev->next_tick_us = now + new_interval_m;
+    // Only update the next tick time IF the new interval time + now is sooner than the old tick + now
+    if ((int32_t)(p_clock_dev->next_tick_us - (now + new_interval_p)) > 0)
+        p_clock_dev->next_tick_us = now + new_interval_p;
 }
 
-void midi_clock_update_poly(midi_clock_dev_t *dev, uint32_t bpm, bool divide, uint8_t num)
-{
-    if (!dev) return;
-    if (num==0) num = 16;
-
-    uint32_t interval = divide ? POLY_BPM_TO_US_DIV(bpm, num)
-                               : POLY_BPM_TO_US_MULT(bpm, num);
-
-    ATOMIC(dev->interval_us = interval);
-
-    if (dev == poly_clock_dev)
-    poly_next_tick_us = now_us() + interval;
-}
-
-void midi_clock_sync_poly(midi_clock_dev_t *dev, uint32_t bpm, bool divide, uint8_t num)
-{
-    if (!dev || !dev->running) return;
-    if (num == 0) num = 16;
-
-    uint32_t interval = divide ? POLY_BPM_TO_US_DIV(bpm, num)
-                               : POLY_BPM_TO_US_MULT(bpm, num);
-
-    ATOMIC(
-        dev->interval_us = interval;
-        dev->tick        = 0;
-    );
-
-    midi_start(dev->midi);
-    poly_next_tick_us = now_us() + interval;
-}
 
 // FOR FUTURE MIDI SYNC / NOT USED
 

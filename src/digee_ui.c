@@ -67,20 +67,22 @@ void ui_draw_full(const digee_state_t *s) {
         prev_s = *s;
     } else {
         // Always draw playstate first, independent of everything else
-        if (s->pause_state != prev_s.pause_state) {
+        if (s->clock.paused != prev_s.clock.paused) {
             ui_draw_playstate(s);
         }
         // Draw divide state second, both icons eliminated
-        if (s->divide_state != prev_s.divide_state) {
+        if (s->divide_s_ui != prev_s.divide_s_ui) {
             ui_draw_mathstate(s);
+            ui_draw_bpm(s);
         }
         // Draw bpm third, its most common thing to be updated
-        if (s->bpm_main != prev_s.bpm_main) {
+        if (s->clock.bpm != prev_s.clock.bpm) {
             ui_draw_bpm(s);
         }
         // Draw buttons
-        if (s->binary != prev_s.binary) {
+        if (s->binary_ui != prev_s.binary_ui) {
             ui_draw_digits(s);
+            ui_draw_bpm(s);
         }
         // Changes the most so for now always draw it
         ui_draw_fraction(s);
@@ -104,12 +106,12 @@ uint8_t bpm_x_offset(uint16_t bpm) {
 
 uint16_t calc_ui_poly(const digee_state_t *s) {
     uint16_t poly = 0;
-    uint8_t tally = s->binary;
+    uint8_t tally = s->binary_ui;
     (tally==0) ? tally = 16 : tally;
-    if (s->divide_state) {
-        poly = (s->bpm_main * tally) / 16;
+    if (s->divide_s_ui) {
+        poly = (s->clock.bpm * tally) / 16;
     } else {
-        poly = (s->bpm_main * 16) / tally;
+        poly = (s->clock.bpm * 16) / tally;
     }
     return poly;
 }
@@ -120,30 +122,30 @@ void ui_draw_bpm(const digee_state_t *s) {
     char bpm2[8];
     uint16_t ui_bpm_poly = calc_ui_poly(s);
 
-    snprintk(bpm1, sizeof(bpm1), "%u", s->bpm_main);
+    snprintk(bpm1, sizeof(bpm1), "%u", s->clock.bpm);
     snprintk(bpm2, sizeof(bpm2), "%u", ui_bpm_poly);
 
     oled_draw_rect(0, 0, BPM_WIDTH, FONT_ROBOTO_HEIGHT);
     oled_write("MSTR", 1, 0, true);
  
-    // oled_draw_rect(0, 32, BPM_WIDTH, FONT_ROBOTO_HEIGHT);
-    // oled_write("SYNC", 1, 32, true);
+    oled_draw_rect(0, 32, BPM_WIDTH, FONT_ROBOTO_HEIGHT);
+    oled_write("SYNC", 1, 32, true);
 
     oled_clear_rect(BPM_X_QUAD, BPM_MAIN_Y, BPM_WIDTH, FONT_ROBOTO_HEIGHT+1);
-    // oled_clear_rect(BPM_X_QUAD, BPM_POLY_Y, BPM_WIDTH, FONT_ROBOTO_HEIGHT+1);
+    oled_clear_rect(BPM_X_QUAD, BPM_POLY_Y, BPM_WIDTH, FONT_ROBOTO_HEIGHT+1);
     
-    uint8_t bpm_main_x = bpm_x_offset(s->bpm_main);
-    // uint8_t bpm_poly_x = bpm_x_offset(ui_bpm_poly);
+    uint8_t bpm_main_x = bpm_x_offset(s->clock.bpm);
+    uint8_t bpm_poly_x = bpm_x_offset(ui_bpm_poly);
     
     oled_write(bpm1, bpm_main_x, BPM_MAIN_Y, false);
-    // oled_write(bpm2, bpm_poly_x, BPM_POLY_Y, false);
+    oled_write(bpm2, bpm_poly_x, BPM_POLY_Y, false);
 }
 
 void ui_draw_fraction(const digee_state_t *s) {
     char fixed_str[8];
     char custom_str[8];
     
-    uint8_t ui_custom = s->binary;
+    uint8_t ui_custom = s->binary_ui;
     if(ui_custom==0) {ui_custom = 16;}
 
     snprintf(fixed_str,  sizeof(fixed_str),  "%u", DIGEE_FIXED);
@@ -155,8 +157,8 @@ void ui_draw_fraction(const digee_state_t *s) {
     oled_clear_rect(FRACTION_X, FRACTION_TOP_Y, FRACTION_W, FRACTION_H);
     oled_clear_rect(FRACTION_X, FRACTION_BOT_Y, FRACTION_W, FRACTION_H);
  
-    const char *top = s->divide_state ? custom_str : fixed_str;
-    const char *bot = s->divide_state ? fixed_str  : custom_str;
+    const char *top = s->divide_s_ui ? custom_str : fixed_str;
+    const char *bot = s->divide_s_ui ? fixed_str  : custom_str;
  
     /* Single digit values get nudged right to sit centred */
     uint8_t top_x = (atoi(top) < 10) ? FRACTION_X_SINGLE : FRACTION_X;
@@ -170,13 +172,13 @@ void ui_draw_playstate(const digee_state_t *s) {
     
     oled_clear_rect(PLAYSTATE_X, PLAYSTATE_Y, PLAYSTATE_W, PLAYSTATE_H);
     
-    const uint8_t *icon = s->pause_state ? pauseIcon : playIcon;
+    const uint8_t *icon = s->clock.paused ? pauseIcon : playIcon;
     oled_draw_bitmap(icon, PLAYSTATE_X, PLAYSTATE_Y, PLAYSTATE_W, PLAYSTATE_H);
 
 }
 
 void ui_draw_mathstate(const digee_state_t *s) {
-    if (s->divide_state) {
+    if (s->divide_s_ui) {
         oled_draw_bitmap(dividerIcon, MATHSTATE_X, MATHSTATE_Y, MATHSTATE_W, MATHSTATE_H);
     } else {
         oled_draw_bitmap(multiplierIcon, MATHSTATE_X, MATHSTATE_Y, MATHSTATE_W, MATHSTATE_H);
@@ -186,7 +188,7 @@ void ui_draw_mathstate(const digee_state_t *s) {
 void ui_draw_digits(const digee_state_t *s) {
     for (int i=0; i<4; i++) {
         char digit[2];
-        uint8_t bit = (s->binary >> (3-i)) & 1;
+        uint8_t bit = (s->binary_ui >> (3-i)) & 1;
         snprintk(digit, sizeof(digit), "%u", bit);
         oled_clear_rect(DIGIT_X, i*FONT_ROBOTO_HEIGHT, FONT_ROBOTO_WIDTH, FONT_ROBOTO_HEIGHT);
         oled_write(digit, DIGIT_X, i*FONT_ROBOTO_HEIGHT, false);

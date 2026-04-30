@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "clocks.h"
 
 #define DIGEE_FIXED 16
 #define BINARY_ONE      0
@@ -11,14 +12,10 @@
 #define BINARY_EIGHT    3
 
 typedef struct {
-    uint8_t     bpm_main;
-    // uint16_t    bpm_poly;
-    uint8_t     binary;
-    uint8_t     binary_prev;
-    bool        divide_state;
-    bool        pause_state;
-    bool        equation_flag;
+    uint8_t     binary_ui;
+    bool        divide_s_ui;
     bool        invert;
+    clock_controller_t clock; 
 } digee_state_t;
 
 extern volatile bool ui_dirty;
@@ -38,6 +35,7 @@ void digee_ui_update(void);
 /* Returns a read-only pointer to current device state.
  * UI layer uses this to read values for rendering. */
 const digee_state_t *digee_get_state(void);
+
 
 /* ------------------------------------------------------------------ */
 /* State mutators — only digee_ctrl changes state                      */

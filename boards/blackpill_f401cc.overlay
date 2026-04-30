@@ -88,6 +88,8 @@
 / {
     chosen {
         zephyr,display = &ssd1306;
+        /*zephyr,console   = &usart1;*/
+        /*zephyr,shell-uart = &usart1;*/
     };
 
     aliases {
