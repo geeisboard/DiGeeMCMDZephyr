@@ -46,7 +46,7 @@ uint32_t POLY_BPM_TO_US(clock_controller_t *dev)
     }
 }
 
-void midi_clock_set_step_callback(step_cb_t cb)
+void clock_set_step_callback(step_cb_t cb)
 {
     step_callback = cb;
 }
@@ -92,7 +92,7 @@ int clock_ctrl_init(clock_controller_t *dev)
     return 0;
 }
 
-int midi_clock_init(midi_clock_dev_t *dev, midi_dev_t *midi, clock_type_t type)
+int clock_init(midi_clock_dev_t *dev, midi_dev_t *midi, clock_type_t type)
 {
     if (!dev || !midi) return -EINVAL;
     // Init clock

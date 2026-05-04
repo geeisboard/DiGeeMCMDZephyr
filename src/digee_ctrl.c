@@ -135,9 +135,9 @@ void digee_init(void)
     clock_ctrl_init(&digee_state.clock);
     midi_init(&midi_master, uart_master);
     midi_init(&midi_poly, uart_poly);
-    midi_clock_init(&master_clock, &midi_master, MASTER_CLOCK);
-    midi_clock_init(&poly_clock, &midi_poly, POLY_CLOCK);
-    midi_clock_set_step_callback(on_96step_callback);
+    clock_init(&master_clock, &midi_master, MASTER_CLOCK);
+    clock_init(&poly_clock, &midi_poly, POLY_CLOCK);
+    clock_set_step_callback(on_96step_callback);
     // Init sensors like buttons and encoder
     buttons_init(on_button_event);
     encoder_btn_init(on_encoder_push);

@@ -35,10 +35,6 @@ static struct encoder_btn_t enc_btn = {
 };
 
 
-/* ------------------------------------------------------------------ */
-/* Work item — runs in system workqueue, safe for I2C / logging       */
-/* ------------------------------------------------------------------ */
-
 static void enc_btn_timer_cb (struct k_timer *timer)
 {   
     // Timer function triggered after 30 ms
