@@ -11,17 +11,19 @@ const oled_buf_t *oled_get_buffer() {
     return &buf;
 }
 
+// Could implement dirty rects concept but we need to discern what pages different elements of the display are in and need to be redrawn to make this efficient and worthwhile
+
 // static dirty undrawnRects[MAX_RECTS] = {0};
 
 // const dirty *getUndrawnRects() {
 //     return &undrawnRects;
 // }
 
-void append_dirty(uint8_t y,uint8_t h) {
-    int page = y / 8;
-    int end_page = (y + h - 1) / 8;
+// void append_dirty(uint8_t y,uint8_t h) {
+//     int page = y / 8;
+//     int end_page = (y + h - 1) / 8;
 
-}
+// }
 
 void oled_clear() {
     memset(buf.data, 0x00, sizeof(buf.data));

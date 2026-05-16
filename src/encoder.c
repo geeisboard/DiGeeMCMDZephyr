@@ -9,9 +9,6 @@
 LOG_MODULE_REGISTER(encoder, LOG_LEVEL_INF);
 
 #define DEBOUNCE_MS 30
-/* ------------------------------------------------------------------ */
-/* Module state                                                        */
-/* ------------------------------------------------------------------ */
 
 static const struct device *s_enc;
 static encoder_rt_cb_t      s_rt_cb;
@@ -33,7 +30,6 @@ static struct encoder_btn_t enc_btn = {
     .spec = GPIO_DT_SPEC_GET(DT_NODELABEL(encodersw0), gpios),
     .last_evt = ENC_BUTTON_EVT_NONE
 };
-
 
 static void enc_btn_timer_cb (struct k_timer *timer)
 {   
@@ -85,11 +81,11 @@ int encoder_btn_init(encoder_btn_cb_t cb)
     // Clear interrupt previous states on reset first
     gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_DISABLE);
 
-    int ret = gpio_pin_configure_dt(&btn->spec, GPIO_INPUT);
+    int setup_failed = gpio_pin_configure_dt(&btn->spec, GPIO_INPUT);
 
-    if (ret) {
+    if (setup_failed) {
         LOG_ERR("Encoder button configure failed");
-        return ret;
+        return setup_failed;
     }
     k_timer_init(&btn->dbl_delay, enc_btn_timer_cb, NULL);
     k_work_init_delayable(&btn->work, enc_btn_work_handler);
@@ -98,19 +94,17 @@ int encoder_btn_init(encoder_btn_cb_t cb)
 
     k_msleep(100);
 
-    ret = gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_EDGE_BOTH);
+    setup_failed = gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_EDGE_BOTH);
 
-    if (ret) {
+    if (setup_failed) {
         LOG_ERR("Encoder button interrupt enable failed ");
-        return ret;
+        return setup_failed;
     }
 
     return 0;
 };
 
-/* ------------------------------------------------------------------ */
-/* Polling fallback thread — used when trigger not supported          */
-/* ------------------------------------------------------------------ */
+// RT
 
 #define ENCODER_POLL_MS  10
 #define ENCODER_STACK_SZ 512
@@ -146,9 +140,7 @@ static void enc_poll_thread(void *p1, void *p2, void *p3)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Public API                                                          */
-/* ------------------------------------------------------------------ */
+// PUBLIC 
 
 int encoder_rt_init(encoder_rt_cb_t cb, int32_t detent)
 {

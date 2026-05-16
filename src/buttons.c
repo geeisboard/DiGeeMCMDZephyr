@@ -29,10 +29,6 @@ static struct button_desc s_buttons[BUTTON_COUNT] = {
 
 static button_cb_t s_cb;
 
-/* ------------------------------------------------------------------ */
-/* Work handler — safe thread context                                  */
-/* ------------------------------------------------------------------ */
-
 static void button_work_handler(struct k_work *work)
 {
     struct k_work_delayable *dwork = k_work_delayable_from_work(work);
@@ -44,10 +40,6 @@ static void button_work_handler(struct k_work *work)
     }
     /* no else — ignore the press edge entirely */
 }
-
-/* ------------------------------------------------------------------ */
-/* GPIO ISR — fires on both edges, submits work immediately           */
-/* ------------------------------------------------------------------ */
 
 static void button_isr(const struct device *port,
                        struct gpio_callback *cb_data,
@@ -61,9 +53,7 @@ static void button_isr(const struct device *port,
     
 }
 
-/* ------------------------------------------------------------------ */
-/* Public API                                                          */
-/* ------------------------------------------------------------------ */
+// PUBLIC
 
 int buttons_init(button_cb_t cb)
 {
@@ -82,10 +72,10 @@ int buttons_init(button_cb_t cb)
         /* Disable interrupt first — clears any leftover state from reset */
         gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_DISABLE);
 
-        int ret = gpio_pin_configure_dt(&btn->spec, GPIO_INPUT);
-        if (ret) {
-            LOG_ERR("Button %d configure failed (%d)", i, ret);
-            return ret;
+        int setup_failed = gpio_pin_configure_dt(&btn->spec, GPIO_INPUT);
+        if (setup_failed) {
+            LOG_ERR("Button %d configure failed (%d)", i, setup_failed);
+            return setup_failed;
         }
 
         k_work_init_delayable(&btn->work, button_work_handler);
@@ -100,10 +90,10 @@ int buttons_init(button_cb_t cb)
     for (int i = 0; i < BUTTON_COUNT; i++) {
         struct button_desc *btn = &s_buttons[i];
 
-        int ret = gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_EDGE_BOTH);
-        if (ret) {
-            LOG_ERR("Button %d interrupt enable failed (%d)", i, ret);
-            return ret;
+        int setup_failed = gpio_pin_interrupt_configure_dt(&btn->spec, GPIO_INT_EDGE_BOTH);
+        if (setup_failed) {
+            LOG_ERR("Button %d interrupt enable failed (%d)", i, setup_failed);
+            return setup_failed;
         }
 
         LOG_INF("Button %d ready on pin %d", i, btn->spec.pin);
